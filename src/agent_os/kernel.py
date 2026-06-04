@@ -126,28 +126,36 @@ class SystemKernel:
                 f"{retrieved_context.combined_summary}\n\n"
                 "Use this context to inform your response."
             )
-            contents.append({
-                "role": "user",
-                "parts": [{"text": context_text}],
-            })
-            contents.append({
-                "role": "model",
-                "parts": [{"text": "I'll use this context to provide an informed response."}],
-            })
+            contents.append(
+                {
+                    "role": "user",
+                    "parts": [{"text": context_text}],
+                }
+            )
+            contents.append(
+                {
+                    "role": "model",
+                    "parts": [{"text": "I'll use this context to provide an informed response."}],
+                }
+            )
 
         # Add recent conversation messages for short-term memory
         if recent_messages:
             for msg in recent_messages:
                 role = "model" if msg.role == Role.ASSISTANT else "user"
-                contents.append({
-                    "role": role,
-                    "parts": [{"text": msg.content}],
-                })
+                contents.append(
+                    {
+                        "role": role,
+                        "parts": [{"text": msg.content}],
+                    }
+                )
 
         # Add the current user message
-        contents.append({
-            "role": "user",
-            "parts": [{"text": user_message}],
-        })
+        contents.append(
+            {
+                "role": "user",
+                "parts": [{"text": user_message}],
+            }
+        )
 
         return contents

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from elasticsearch import AsyncElasticsearch
@@ -64,12 +65,14 @@ class MemoryDaemon:
         config: AgentOSConfig,
         mcp_client: ElasticMCPClient,
         session_id: str,
+        on_compress_success: Callable[[SemanticAtom], None] | None = None,
     ) -> None:
         self._config = config
         self._mcp_client = mcp_client
         self._session_id = session_id
         self._client = genai.Client(api_key=config.gemini_api_key)
         self._threshold = config.compression_threshold
+        self._on_compress_success = on_compress_success
 
         # Direct Elasticsearch client for writes
         self._es = AsyncElasticsearch(
@@ -220,6 +223,10 @@ class MemoryDaemon:
         # Store in Elastic via MCP
         await self._store_atom(atom)
 
+        # Emit the success event so the Session can evict these messages
+        if self._on_compress_success:
+            self._on_compress_success(atom)
+
         return atom
 
     async def _compress_messages(self, messages: list[Message]) -> SemanticAtom:
@@ -265,9 +272,7 @@ class MemoryDaemon:
             cleaned = response.text.strip()
             if cleaned.startswith("```"):
                 lines = cleaned.split("\n")
-                cleaned = "\n".join(
-                    lines[1:-1] if lines[-1].strip() == "```" else lines[1:]
-                )
+                cleaned = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
             data = json.loads(cleaned)
 
@@ -324,4 +329,3 @@ class MemoryDaemon:
 
         except Exception as e:
             raise StorageError(f"Failed to store atom {atom.id}: {e}") from e
-

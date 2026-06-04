@@ -16,7 +16,7 @@ from agent_os.exceptions import SessionNotStartedError
 from agent_os.kernel import SystemKernel
 from agent_os.logging import get_logger, setup_logging
 from agent_os.mcp_client import ElasticMCPClient
-from agent_os.models import Message, Role
+from agent_os.models import Message, Role, SemanticAtom
 from agent_os.router import RouterMMU
 
 if TYPE_CHECKING:
@@ -62,6 +62,15 @@ class Session:
         # Context manager for MCP connection
         self._mcp_context = None
 
+        # Metrics for System Monitor
+        self.total_tokens_saved = 0
+        self.total_atoms_swapped = 0
+        self.last_turn_metrics = {
+            "latency_sec": 0.0,
+            "page_fault": False,
+            "daemon_buffer": 0,
+        }
+
         logger.info("session_created", session_id=self._session_id)
 
     @property
@@ -106,7 +115,12 @@ class Session:
         # Initialize components
         self._kernel = SystemKernel(self._config)
         self._router = RouterMMU(self._config, self._mcp_client)
-        self._daemon = MemoryDaemon(self._config, self._mcp_client, self._session_id)
+        self._daemon = MemoryDaemon(
+            self._config,
+            self._mcp_client,
+            self._session_id,
+            on_compress_success=self._on_atom_stored,
+        )
 
         # Start the background daemon
         self._daemon.start()
@@ -167,6 +181,10 @@ class Session:
         assert self._router is not None
         assert self._daemon is not None
 
+        import time
+
+        start_time = time.time()
+
         # Record user message
         user_message = Message(role=Role.USER, content=user_input)
         self._messages.append(user_message)
@@ -180,6 +198,7 @@ class Session:
         # Step 1: Route — does this message need historical context?
         recent = self._get_recent_messages()
         retrieved_context = await self._router.route(user_input, recent)
+        page_fault = not retrieved_context.is_empty
 
         # Step 2: Generate — produce a response with the Kernel
         response_text = await self._kernel.generate(
@@ -196,15 +215,40 @@ class Session:
         self._daemon.add_message(user_message)
         self._daemon.add_message(assistant_message)
 
+        # Update metrics
+        self.last_turn_metrics = {
+            "latency_sec": time.time() - start_time,
+            "page_fault": page_fault,
+            "daemon_buffer": self._daemon.buffer_size,
+        }
+
         logger.info(
             "chat_turn_completed",
             session_id=self._session_id,
-            context_used=not retrieved_context.is_empty,
+            context_used=page_fault,
             response_length=len(response_text),
             daemon_buffer_size=self._daemon.buffer_size,
         )
 
         return response_text
+
+    def _on_atom_stored(self, atom: SemanticAtom) -> None:
+        """Callback invoked by the MemoryDaemon when messages are swapped to Elastic.
+
+        This implements True Paging: once compressed, messages are evicted from RAM.
+        """
+        compressed_ids = set(atom.source_message_ids)
+
+        # Estimate token savings (rough heuristic: 1 token ~= 4 chars)
+        for msg in self._messages:
+            if msg.id in compressed_ids:
+                self.total_tokens_saved += len(msg.content) // 4
+
+        # Evict from active RAM
+        self._messages = [m for m in self._messages if m.id not in compressed_ids]
+        self.total_atoms_swapped += 1
+
+        logger.info("messages_evicted", count=len(compressed_ids), new_ram_size=len(self._messages))
 
     def _get_recent_messages(self) -> list[Message]:
         """Get the most recent messages for short-term context.
