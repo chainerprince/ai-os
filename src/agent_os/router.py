@@ -125,9 +125,7 @@ class RouterMMU:
             for msg in recent_messages[-5:]:  # Only last 5 messages for the router
                 role_label = "User" if msg.role == Role.USER else "Assistant"
                 lines.append(f"{role_label}: {msg.content[:200]}")
-            conversation_context = (
-                "Recent conversation:\n" + "\n".join(lines) + "\n\n"
-            )
+            conversation_context = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
 
         prompt = f"{conversation_context}Current user message: {user_message}"
 
@@ -186,9 +184,7 @@ class RouterMMU:
         try:
             return RoutingDecision(**data)
         except Exception as e:
-            raise RoutingDecisionError(
-                f"Router JSON missing required fields: {e}"
-            ) from e
+            raise RoutingDecisionError(f"Router JSON missing required fields: {e}") from e
 
     async def _fetch_context(self, search_query: str) -> RetrievedContext:
         """Fetch relevant context from the Elastic MCP server.
@@ -288,4 +284,3 @@ class RouterMMU:
             keywords=keywords,
             session_id=session_id or "unknown",
         )
-

@@ -80,9 +80,7 @@ class SemanticAtom(BaseModel):
             "time_range_start": (
                 self.time_range_start.isoformat() if self.time_range_start else None
             ),
-            "time_range_end": (
-                self.time_range_end.isoformat() if self.time_range_end else None
-            ),
+            "time_range_end": (self.time_range_end.isoformat() if self.time_range_end else None),
         }
 
 
